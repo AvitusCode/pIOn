@@ -1,40 +1,46 @@
 ﻿#include <iostream>
-#include <cassert>
-#include "tests/tests.hpp"
 #include "config.h"
-
-struct key_t
-{
-	uint64_t op     : 2;
-	uint64_t size   : 31;
-	uint64_t offset : 31;
-
-	explicit key_t(char op_ = 'R', uint64_t size_ = 0UL, uint64_t offset_ = 0UL)
-		: op(op_ == 'R' ? 0UL : 1UL)
-		, size(size_ / 8)
-		, offset(offset_ / 8)
-	{
-		assert(op_ == 'R' || op_ == 'W' && "Only R or W operation are allowed");
-	}
-
-	uint64_t to_key() const {
-		return *reinterpret_cast<const uint64_t*>(this);
-	}
-};
+#include "research/research.hpp"
 
 /*
-* На следующей итерации: 
-* 1) Написать класс модели и доработать итератор под модель
-* 2) Окончательно решить, как представлять данные об I/O в программе
-* 
+
+[vps]
+group1) 11425000 11450000
+group2) 2800000 3000000
+group3) 10300000 10400000
+
+big group 1) 10350000 - 10400000 (good)
+big group 2) 10350000 - 10450000 (problems)
+big group 3) 4100000 - 4150000 (good)
+
+laptop 1) 6000000 - 16000000
+laptop 2) 25000000 - 27000000
+*/
+
+/*
+TODO: 
+3) config with yaml or json
 */
 
 int main(void)
 {
-	std::cout << "Hello pIOn!" << std::endl;
+	std::cout << "Hello pIOn!\n" << std::endl;
+	pIOn::Config config;
+	config.filename = ROOT_DIR "traces/laptop_trace.blktrace.2";
+	config.verbose = true;
+	config.delta = false;
+	config.start = 0;
+	config.end = 20000;
+	config.max_cmd = config.end - config.start;
+	config.max_grammar_size = 1000;
+	config.lba_start = 25000000;
+	config.lba_end = 27000000;
+	config.is_pid_filter_ = false;
+	config.pid = 0;
+	config.window_size = 10;
+	config.hit_precentage = 70.0;
 
-	test::test_reader(ROOT_DIR "test1.txt");
-	static_assert(sizeof(key_t{}) == sizeof(uint64_t));
+	pIOn::makeResearch(config);
 
 	return 0;
 }

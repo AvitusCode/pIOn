@@ -14,24 +14,24 @@ namespace pIOn::sequitur {
 	Rules::Rules(Predictor* pred) 
 	{
 		predictor_ = pred;
-		guard_ = pointer_t(new Symbols(this, this), [](Symbols* ptr) { ptr->release(); delete ptr; });
+		guard_ = pred->allocateSymbol(this, this);
 		guard_->point_to_self();
-		count_ = number_ = 0;
-		users_.erase(guard_.get());
+		idx_ = 0;
+		users_.erase(guard_);
 		predictor_->rules_set_.insert(this);
 	}
 
 	Rules::~Rules() noexcept {
 		predictor_->rules_set_.erase(this);
+		guard_->release();
+		predictor_->deallocate(guard_);
 	}
 
 	void Rules::reuse(Symbols* user) {
-		count_++;
 		users_.insert(user);
 	}
 
 	void Rules::deuse(Symbols* user) {
-		count_--;
 		users_.erase(user);
 	}
 
@@ -41,6 +41,13 @@ namespace pIOn::sequitur {
 
 	Symbols* Rules::last() const {
 		return guard_->prev();
+	}
+
+	void Rules::for_each(std::function<void(Symbols*)> func) noexcept
+	{
+		for (Symbols* s = first(); s != last(); s = s->next()) {
+			func(s);
+		}
 	}
 
 	size_t Rules::length() const {

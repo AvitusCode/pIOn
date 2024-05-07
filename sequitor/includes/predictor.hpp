@@ -6,16 +6,19 @@
  https://www.apache.org/licenses/LICENSE-2.0
 *******************************************************************************/
 
-
 #include <iostream>
 #include <set>
 #include <list>
 #include <vector>
+#include <unordered_map>
 #include <map>
 #include <stack>
+#include "utils/iterator_range.hpp"
 #include "types.hpp"
 #include "rules.hpp"
 #include "symbols.hpp"
+#include "utils/hashing.hpp"
+#include "utils/object_pool.hpp"
 
 namespace pIOn::sequitur {
 
@@ -25,24 +28,26 @@ namespace pIOn::sequitur {
 		friend class Symbols;
 		friend class Rules;
 
-		Rules* start_{ nullptr };
+		Rules* axiom_{ nullptr };
 		Symbols* root_{ nullptr };
 
 		std::set<Rules*> rules_set_;
-		std::map<std::pair<uint64_t, uint64_t>, Symbols*> table_;
-
 		std::set<Symbols*> predictions_;
+		std::map<std::pair<uint64_t, uint64_t>, Symbols*> index_;
 
 		std::vector<Rules*> rules_;
-		uint64_t rule_idx_{0};
-		uint64_t version_{0UL}; // number of modifications performed
+		uint64_t rule_idx_{ 0ULL };
+		uint64_t version_{ 0ULL }; // For iterator validation and limits checks
+		size_t limit_{ ~0ULL }; // Grammar limit 
 
-		void find_new_predictors(Symbols* s);
+		// Perform operations with the index
 		Symbols* find_digram(Symbols* s);
 		void delete_digram(Symbols* s);
 		void set_digram(Symbols* s);
+
+		void find_new_predictors(Symbols* s);
 		void print_rule(std::ostream& stream, Rules* r);
-		void release() noexcept;
+		bool checkLimits();
 
 		void add_prediction(Symbols* s) {
 			predictions_.insert(s);
@@ -58,17 +63,43 @@ namespace pIOn::sequitur {
 
 		std::list<std::stack<Symbols*>> build_predictor_stack_from(Symbols* s) const;
 
+		// ObjectPool API
+		utils::ObjectPool<Rules> rulesPool;
+		utils::ObjectPool<Symbols> symbolsPool;
+
+		template<typename... Args>
+		Rules* allocateRule(Args&&... args)
+		{
+			return rulesPool.allocate(std::forward<Args>(args)...);
+		}
+
+		template<typename... Args>
+		Symbols* allocateSymbol(Args&&... args)
+		{
+			return symbolsPool.allocate(std::forward<Args>(args)...);
+		}
+
+		template<typename T>
+		void deallocate(T* ptr) noexcept
+		{
+			if constexpr (std::is_same_v<T, Rules>) {
+				rulesPool.deallocate(ptr);
+			}
+			else {
+				symbolsPool.deallocate(ptr);
+			}
+		}
+
+		void clearSpace() noexcept;
 	public:
 		Predictor();
 		Predictor(const Predictor&) = delete;
-		Predictor(Predictor&&) = delete;
 		Predictor& operator=(const Predictor&) = delete;
-		Predictor& operator=(Predictor&&) = delete;
+		Predictor(Predictor&&) noexcept;
+		Predictor& operator=(Predictor&&) noexcept;
 		~Predictor() noexcept;
 
-		void input(uint64_t x);
-		std::set<uint64_t> predict_next() const;
-		size_t size() const;
+		using iterator_range = IteratorRange<std::set<Symbols*>::iterator>;
 
 		class iterator 
 		{
@@ -107,14 +138,19 @@ namespace pIOn::sequitur {
 		};
 
 		iterator begin() const {
-			return iterator(this, start_->first());
+			return iterator(this, axiom_->first());
 		}
 
 		iterator end() const {
 			return iterator(this);
 		}
 
+		bool insert(uint64_t x);
+		std::list<uint64_t> predict_next() const;
 		std::list<iterator> predict_all() const;
+		iterator_range predict_range() const;
+		size_t size() const;
+		void setLimits(size_t limit);
 
 		friend std::ostream& operator<<(std::ostream& stream, Predictor& o);
 	};

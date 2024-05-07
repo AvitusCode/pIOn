@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <memory>
 
+#define LOOP while(true)
+
 namespace pIOn
 {
 	template<typename T>

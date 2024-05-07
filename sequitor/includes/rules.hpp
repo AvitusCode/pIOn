@@ -18,23 +18,17 @@ namespace pIOn::sequitur {
 	class Rules
 	{
 	private:
-		friend class Symbols;
-		using pointer_t = uptr_d<Symbols, std::function<void(Symbols*)>>;
-
 		// The guard node in the linked list of symbols that make up the rule
 		// It points forward to the first symbol in the rule, and backwards
 		// to the last symbol in the rule. Its own value points to the rule data
 		// structure, so that symbols can find out which rule they're in
-		pointer_t guard_;
+		Symbols* guard_;
 
-		// count keeps track of the number of times the rule is used in the grammar
-		uint64_t count_{ 0 };
-
-		// keeps track of instantiations of the rule
+		// Chains that using this rule
 		std::set<Symbols*> users_;
 
 		// For inner using
-		uint64_t number_{ 0 };
+		uint64_t idx_{ 0 };
 		Predictor* predictor_{ nullptr };
 	public:
 		Rules() = delete;
@@ -52,14 +46,15 @@ namespace pIOn::sequitur {
 		Symbols* first() const;
 		Symbols* last() const;
 		size_t length() const;
+		void for_each(std::function<void(Symbols*)> func) noexcept;
 
-		uint64_t freq() const { return count_; };
-		uint64_t index() const { return number_; };
-		void index(uint64_t i) { number_ = i; };
+		uint64_t freq() const { return users_.size(); };
+		uint64_t index() const { return idx_; };
+		void index(uint64_t idx) { idx_ = idx; };
 		Predictor* get_predictor() const { return predictor_; };
 		std::set<Symbols*>& get_users() { return users_; };
 		const std::set<Symbols*>& get_users() const { return users_; };
-		const Symbols* get_guard() const { return guard_.get(); };
+		const Symbols* get_guard() const { return guard_; };
 	};
 
 }

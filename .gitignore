@@ -1,5 +1,8 @@
 .vs/
 out/
+res/
+traces/
 CMakePresets.json
-data.txt
 test1.txt
+test2.txt
+.claudiaideconfig

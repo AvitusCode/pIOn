@@ -6,6 +6,10 @@ set(SEQUITOR_SRC
         src/predictor.cpp
         src/rules.cpp
         src/symbols.cpp
+        src/model/io_prophet.cpp
+        src/model/blk_info.cpp
+        src/key_functions/standart_key.cpp
+        src/key_functions/simple_key.cpp
 )
 
 add_library(${SEQUITOR} STATIC ${SEQUITOR_SRC})

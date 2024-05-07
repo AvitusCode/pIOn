@@ -8,6 +8,7 @@
 #include <iostream>
 #include "symbols.hpp"
 #include "predictor.hpp"
+#include <stack>
 
 std::ostream& operator<<(std::ostream& out, pIOn::sequitur::Symbols& s) {
 
@@ -15,7 +16,7 @@ std::ostream& operator<<(std::ostream& out, pIOn::sequitur::Symbols& s) {
 		out << s.rule()->index();
 	}
 	else {
-		out << s.value();
+		out << s.get_symbol();
 	}
 	return out;
 }
@@ -34,10 +35,10 @@ namespace pIOn::sequitur {
 		owner_ = o;
 	}
 
-	void Symbols::release()
+	Symbols& Symbols::release()
 	{
 		if (prev_ == nullptr && next_ == nullptr) {
-			return;
+			return *this;
 		}
 
 		join(prev_, next_);
@@ -52,22 +53,18 @@ namespace pIOn::sequitur {
 		if (is_pred() && !nt() && owner_ != nullptr) {
 			owner_->get_predictor()->remove_prediction(this);
 		}
+
+		return *this;
+	}
+
+	void Symbols::self_delete()
+	{
+		Predictor* pred = owner_->get_predictor();
+		pred->deallocate(this);
 	}
 
 	Symbols* Symbols::find_digram() {
 		return owner_->get_predictor()->find_digram(this);
-	}
-
-	void Symbols::delete_digram() {
-		if (is_guard() || next_->is_guard()) {
-			return;
-		}
-
-		if (owner_ == nullptr) {
-			return;
-		}
-
-		owner_->get_predictor()->delete_digram(this);
 	}
 
 	void Symbols::set_digram() {
@@ -80,6 +77,18 @@ namespace pIOn::sequitur {
 		}
 
 		owner_->get_predictor()->set_digram(this);
+	}
+
+	void Symbols::delete_digram() {
+		if (is_guard() || next_->is_guard()) {
+			return;
+		}
+
+		if (owner_ == nullptr) {
+			return;
+		}
+
+		owner_->get_predictor()->delete_digram(this);
 	}
 
 	// This symbol is the last reference to its rule. It is deleted, and the contents of the rule substituted in its place.
@@ -97,8 +106,7 @@ namespace pIOn::sequitur {
 		// into the users that have this symbol as a predictor (usr = only A)
 		if (is_pred()) {
 			for (auto user = owner_->get_users().begin(); user != owner_->get_users().end(); ++user) {
-				if ((*user)->predictors_.count(this)) {
-					(*user)->predictors_.erase(this);
+				if ((*user)->predictors_.erase(this)) {
 					(*user)->predictors_.insert(predictors_.begin(), predictors_.end());
 				}
 			}
@@ -114,10 +122,10 @@ namespace pIOn::sequitur {
 
 		delete_digram();
 
-		delete rule();
+		Predictor* pred = owner_->get_predictor();
+		pred->deallocate(rule());
 		sym_ = 0;
-		release();
-		delete this;
+		release().self_delete();
 
 		join(left, first);
 		join(last, right);
@@ -135,7 +143,7 @@ namespace pIOn::sequitur {
 		Symbols* q = prev_; // q = previous
 
 		// create the new symbol ("B" in rule A in the example)
-		Symbols* B = new Symbols(r, owner_);
+		Symbols* B = r->get_predictor()->allocateSymbol(r, owner_);
 		Symbols* X1 = this;
 		Symbols* X2 = r->first();
 		Symbols* Y1 = X1->next();
@@ -145,8 +153,7 @@ namespace pIOn::sequitur {
 		{
 			B->is_predictor_ = true;
 			for (auto user = owner_->get_users().begin(); user != owner_->get_users().end(); ++user) {
-				if ((*user)->predictors_.count(X1)) {
-					(*user)->predictors_.erase(X1);
+				if ((*user)->predictors_.erase(X1)) {
 					(*user)->predictors_.insert(B);
 				}
 			}
@@ -172,8 +179,8 @@ namespace pIOn::sequitur {
 			s_update(B, Y1, Y2);
 		}
 
-		X1->release(); delete X1;
-		Y1->release(); delete Y1;
+		X1->release().self_delete();
+		Y1->release().self_delete();
 
 		q->insert_after(B);
 
@@ -200,17 +207,18 @@ namespace pIOn::sequitur {
 			// another "ab" which is somewhere else but does not yet
 			// correspond to a rule.
 			// create a new rule for "ab"
-			r = new Rules(ss->owner_->get_predictor());
+			Predictor* pred = ss->owner_->get_predictor();
+			r = pred->allocateRule(pred);
 
 			if (ss->nt())
-				r->last()->insert_after(new Symbols(ss->rule(), r));
+				r->last()->insert_after(pred->allocateSymbol(ss->rule(), r));
 			else
-				r->last()->insert_after(new Symbols(ss->value(), r));
+				r->last()->insert_after(pred->allocateSymbol(ss->get_symbol(), r));
 
 			if (ss->next()->nt())
-				r->last()->insert_after(new Symbols(ss->next()->rule(), r));
+				r->last()->insert_after(pred->allocateSymbol(ss->next()->rule(), r));
 			else
-				r->last()->insert_after(new Symbols(ss->next()->value(), r));
+				r->last()->insert_after(pred->allocateSymbol(ss->next()->get_symbol(), r));
 
 			m->substitute(r);
 			ss->substitute(r);
@@ -224,43 +232,148 @@ namespace pIOn::sequitur {
 		}
 	}
 
-	// When called on a rule, the first item of the rule becomes a predictor, and so on recursively
+	void Symbols::set_as_predictor(bool is_pred)
+	{
+		is_predictor_ = is_pred;
+	}
+
+	void Symbols::set_first_to_predictor()
+	{
+		predictors_.insert(rule()->first());
+	}
+
+	void Symbols::set_last_to_predictor()
+	{
+		predictors_.insert(rule()->last());
+	}
+
+	void Symbols::set_sym_to_predictor()
+	{
+		owner_->get_predictor()->add_prediction(this);
+	}
+
+	bool Symbols::set_as_predictor(Symbols* symbol)
+	{
+		return predictors_.insert(symbol).second;
+	}
+
+	// When called on a rule, the first item of the rule becomes a predictor, and so on
 	void Symbols::become_predictor_down_left() {
-		is_predictor_ = true;
-		if (nt()) {
-			predictors_.insert(rule()->first());
-			rule()->first()->become_predictor_down_left();
-		}
-		else {
-			owner_->get_predictor()->add_prediction(this);
+		set_as_predictor(true);
+		
+		Symbols* sym_ptr = this;
+		LOOP
+		{
+			if (sym_ptr->nt())
+			{
+				sym_ptr->set_first_to_predictor();
+				sym_ptr = sym_ptr->rule()->first();
+				sym_ptr->set_as_predictor(true);
+			}
+			else
+			{
+				sym_ptr->set_sym_to_predictor();
+				break;
+			}
 		}
 	}
 
 	void Symbols::become_predictor_down_right() {
-		is_predictor_ = true;
-		if (nt()) {
-			predictors_.insert(rule()->last());
-			rule()->last()->become_predictor_down_right();
-		}
-		else {
-			owner_->get_predictor()->add_prediction(this);
+		set_as_predictor(true);
+		
+		Symbols* sym_ptr = this;
+		LOOP
+		{
+			if (sym_ptr->nt())
+			{
+				sym_ptr->set_last_to_predictor();
+				sym_ptr = sym_ptr->rule()->last();
+				sym_ptr->set_as_predictor(true);
+			}
+			else
+			{
+				sym_ptr->set_sym_to_predictor();
+				break;
+            }
 		}
 	}
 
 	void Symbols::become_predictor_up(Symbols* child) {
-		if (predictors_.count(child)) {
-			return;
+		struct user_child_pack
+		{
+			Symbols* user{ nullptr };
+			Symbols* child{ nullptr };
+
+			user_child_pack(Symbols* u, Symbols* c)
+				: user(u)
+				, child(c)
+			{}
+		};
+
+		std::stack<user_child_pack> stack;
+		stack.emplace(this, child);
+
+		while (!stack.empty())
+		{
+			auto pack = stack.top(); stack.pop();
+
+			if (!pack.user->set_as_predictor(pack.child)) {
+				continue;
+			}
+
+			pack.user->set_as_predictor(true);
+
+			if (!pack.user->owner_) {
+				continue;
+			}
+
+			auto&& users = pack.user->owner_->get_users();
+			for (auto user = users.begin(); user != users.end(); ++user) {
+				stack.emplace(*user, pack.user);
+			}
 		}
+	}
 
-		predictors_.insert(child);
-		is_predictor_ = true;
-
-		if (owner_ == nullptr) {
-			return;
+	inline void Symbols::process_matching(Symbols* matching)
+	{
+		for (auto it = predictors_.begin(); it != predictors_.end(); ++it) {
+			Symbols* s = *it;
+			switch (s->compute_next_predictors(matching)) {
+			case 0: // child says I'm not a predictor! do nothing
+				break;
+			case 1: // child says I'm a predictor, and I keep being one.
+				next_stay_predictor_.insert(s);
+				next_return_ |= 1;
+				break;
+			case 2: // child says I'm a predictor and completed the prediction, use s->next() if exist, otherwise return 2 (or 3 yourself).
+				if (s->next()->is_guard()) {
+					// if there is no next one, ask the parent to
+					// find a next one. And change the next_return
+					// to either 3 or 2 depending on wether we 
+					// should stay a predictor (1) or not (0).
+					next_return_ |= 2;
+				}
+				else {
+					// if the next one is not a guard, we can add it
+					// as predictor, and we stay a predictor (1).
+					next_new_predictor_.insert(s->next());
+					next_return_ |= 1;
+				}
+				break;
+			case 3: // child says I'm a predictor, I stay one and my next() should also be a predictor.
+				next_return_ |= 1;
+				next_stay_predictor_.insert(s);
+				if (!s->next()->is_guard()) {
+					next_new_predictor_.insert(s->next());
+				}
+				else {
+					next_return_ |= 2;
+				}
+				break;
+			}
 		}
-
-		for (auto user = owner_->get_users().begin(); user != owner_->get_users().end(); ++user) {
-			(*user)->become_predictor_up(this);
+		if (next_stay_predictor_.empty() && next_new_predictor_.empty()) {
+			next_is_predictor_ = false;
 		}
 	}
 
@@ -276,7 +389,7 @@ namespace pIOn::sequitur {
 		next_return_ = 0;
 		next_is_predictor_ = true;
 
-		if (matching->raw_value() == this->raw_value()) {
+		if (matching->get_symbol() == this->get_symbol()) {
 			next_return_ = 2;
 			next_is_predictor_ = false;
 			owner_->get_predictor()->remove_prediction(this);
@@ -284,52 +397,13 @@ namespace pIOn::sequitur {
 		}
 
 		if (nt()) {
-			for (auto it = predictors_.begin(); it != predictors_.end(); ++it) {
-				Symbols* s = *it;
-				auto r = s->compute_next_predictors(matching);
-				switch (r) {
-				case 0: // child says I'm not a predictor! do nothing
-					break;
-				case 1: // child says I'm a predictor, and I keep being one.
-					next_stay_predictor_.insert(s);
-					next_return_ |= 1;
-					break;
-				case 2: // child says I'm a predictor and completed the prediction, use s->next() if exist, otherwise return 2 (or 3 yourself).
-					if (s->next()->is_guard()) {
-						// if there is no next one, ask the parent to
-						// find a next one. And change the next_return
-						// to either 3 or 2 depending on wether we 
-						// should stay a predictor (1) or not (0).
-						next_return_ |= 2;
-					}
-					else {
-						// if the next one is not a guard, we can add it
-						// as predictor, and we stay a predictor (1).
-						next_new_predictor_.insert(s->next());
-						next_return_ |= 1;
-					}
-					break;
-				case 3: // child says I'm a predictor, I stay one and my next() should also be a predictor.
-					next_return_ |= 1;
-					next_stay_predictor_.insert(s);
-					if (!s->next()->is_guard()) {
-						next_new_predictor_.insert(s->next());
-					}
-					else {
-						next_return_ |= 2;
-					}
-					break;
-				}
-			}
-			if (next_stay_predictor_.empty() && next_new_predictor_.empty()) {
-				next_is_predictor_ = false;
-			}
+			process_matching(matching);
 			return next_return_;
 		}
 		else {
 			next_is_predictor_ = false;
 			owner_->get_predictor()->remove_prediction(this);
-			if (matching->raw_value() == this->raw_value()) {
+			if (matching->get_symbol() == this->get_symbol()) {
 				return 2;
 			}
 			else {
@@ -364,7 +438,7 @@ namespace pIOn::sequitur {
 		}
 		else {
 			predictors_.clear();
-			if (owner_ != nullptr) {
+			if (owner_) {
 				owner_->get_predictor()->remove_prediction(this);
 			}
 		}
@@ -374,22 +448,19 @@ namespace pIOn::sequitur {
 	}
 
 	void Symbols::find_potential_predictors(Symbols* matching) {
-		if (this == matching) {
-			return;
-		}
 
-		// prevents from using the last symbol of the rule, which will disappear anyway
-		if (this->raw_value() == matching->raw_value()) {
-			if (owner_ != nullptr) {
-				become_predictor_down_right();
-				for (auto user = owner_->get_users().begin(); user != owner_->get_users().end(); ++user) {
-					(*user)->become_predictor_up(this);
+		for (Symbols* sym_ptr = this; sym_ptr != matching && !sym_ptr->next()->is_guard(); sym_ptr = sym_ptr->next())
+		{
+			// prevents from using the last symbol of the rule, which will disappear anyway
+			if (sym_ptr->get_symbol() == matching->get_symbol()) {
+				if (owner_) {
+					become_predictor_down_right();
+					auto&& users = owner_->get_users();
+					for (auto user = users.begin(); user != users.end(); ++user) {
+						(*user)->become_predictor_up(sym_ptr);
+					}
 				}
 			}
-		}
-
-		if (!next()->is_guard()) {
-			next()->find_potential_predictors(matching);
 		}
 	}
 

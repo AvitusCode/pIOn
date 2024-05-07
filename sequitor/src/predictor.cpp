@@ -7,54 +7,68 @@ namespace pIOn::sequitur {
 	
 	Predictor::Predictor()
 	{
-		start_ = new Rules(this);
-		root_ = new Symbols(start_);
+		axiom_ = allocateRule(this);
+		root_ = allocateSymbol(axiom_);
 	}
 
-	Predictor::~Predictor() noexcept {
-		release();
-		root_->release();
-		delete root_;
-		rules_set_.clear();
-	}
-
-	void Predictor::release() noexcept
+	Predictor::Predictor(Predictor&& other) noexcept
 	{
-		std::vector<Symbols*> syms_to_delete;
-		syms_to_delete.reserve(2 * get_num_rules());
-		rules_.assign(get_num_rules(), nullptr);
-		rules_[0] = start_;
-		rule_idx_ = 1;
+		this->operator=(std::move(other));
+	}
 
-		auto set_to_release = [this, &syms_to_delete](Rules* r)
+	Predictor& Predictor::operator=(Predictor&& other) noexcept
+	{
+		if (this != std::addressof(other))
 		{
-			for (Symbols* s = r->first(); !s->is_guard(); s = s->next()) {
-				if (s->nt()) {
-					uint64_t i{ 0 };
-
-					if (rules_[s->rule()->index()] == s->rule()) {
-						i = s->rule()->index();
-					}
-					else {
-						i = rule_idx_;
-						s->rule()->index(rule_idx_);
-						rules_[rule_idx_++] = s->rule();
-					}
-				}
-
-				syms_to_delete.push_back(s);
-			}
-		};
-
-		for (uint64_t i = 0; i < rule_idx_; i++) {
-			set_to_release(rules_[i]);
+			axiom_ = std::exchange(other.axiom_, nullptr);
+			root_ = std::exchange(other.root_, nullptr);
+			rules_set_ = std::move(other.rules_set_);
+			predictions_ = std::move(other.predictions_);
+			index_ = std::move(other.index_);
+			rules_ = std::move(other.rules_);
+			rule_idx_ = std::exchange(other.rule_idx_, 0ULL);
+			version_ = std::exchange(other.version_, 0ULL);
+			limit_ = std::exchange(other.limit_, ~0ULL);
 		}
-		for (uint64_t i = 0; i < rule_idx_; i++) {
-			delete rules_[i];
+
+		return *this;
+	}
+
+	Predictor::~Predictor() = default;
+
+	void Predictor::clearSpace() noexcept
+	{
+		rulesPool.freeSpace();
+		symbolsPool.freeSpace();
+	}
+
+	bool Predictor::checkLimits()
+	{
+		if (auto sz = size(); sz < limit_) {
+			return true;
 		}
-		for (Symbols* symbol : syms_to_delete) {
-			delete symbol;
-		}
+
+		root_->release();
+		deallocate(root_);
+		deallocate(axiom_);
+
+		rules_set_.clear();
+		predictions_.clear();
+		index_.clear();
+		rules_.clear();
+		rule_idx_ = version_ = 0ULL;
+
+		clearSpace();
+
+		axiom_ = allocateRule(this);
+		root_ = allocateSymbol(axiom_);
+
+		return false;
+	}
+
+	void Predictor::setLimits(size_t limit)
+	{
+		limit_ = limit;
 	}
 
 	void Predictor::find_new_predictors(Symbols* s)
@@ -65,37 +79,45 @@ namespace pIOn::sequitur {
 		}
 	}
 
-	void Predictor::input(uint64_t x) {
-		version_++;
+	bool Predictor::insert(uint64_t x) {
+		bool is_limits = checkLimits();
+		++version_;
 
-		Symbols* s = new Symbols(x, start_);
-		start_->last()->insert_after(s);
+		Symbols* s = allocateSymbol(x, axiom_);
+		axiom_->last()->insert_after(s);
 
 		root_->compute_next_predictors(s);
 		root_->update_predictors();
-		start_->last()->prev()->check();
+		axiom_->last()->prev()->check();
 
 		if (!root_->is_pred()) {
-			find_new_predictors(start_->last());
+			find_new_predictors(axiom_->last());
 			root_->compute_next_predictors(s);
 			root_->update_predictors();
 		}
+
+		return is_limits;
 	}
 
-	std::set<uint64_t> Predictor::predict_next() const {
-		std::set<uint64_t> result;
+	std::list<uint64_t> Predictor::predict_next() const {
+		std::list<uint64_t> result;
 		for (auto it = predictions_.begin(); it != predictions_.end(); ++it) {
 			if (!(*it)->nt()) {
-				result.insert((*it)->value());
+				result.push_back((*it)->get_symbol());
 			}
 		}
 		return result;
 	}
 
-	Symbols* Predictor::find_digram(Symbols* s) {
-		std::pair<uint64_t, uint64_t> key(s->raw_value(), s->next()->raw_value());
+	Predictor::iterator_range Predictor::predict_range() const
+	{
+		return make_iterator_range_view(predictions_);
+	}
 
-		if (auto iter = table_.find(std::move(key)); iter != table_.end()) {
+	Symbols* Predictor::find_digram(Symbols* s) {
+		std::pair<uint64_t, uint64_t> key(s->get_symbol(), s->next()->get_symbol());
+
+		if (auto iter = index_.find(std::move(key)); iter != index_.end()) {
 			return iter->second;
 		}
 		else {
@@ -104,16 +126,16 @@ namespace pIOn::sequitur {
 	}
 
 	void Predictor::delete_digram(Symbols* s) {
-		std::pair<uint64_t, uint64_t> key(s->raw_value(), s->next()->raw_value());
+		std::pair<uint64_t, uint64_t> key(s->get_symbol(), s->next()->get_symbol());
 
-		if (auto iter = table_.find(std::move(key)); iter != table_.end() && iter->second == s) {
-		    table_.erase(iter);
+		if (auto iter = index_.find(std::move(key)); iter != index_.end() && iter->second == s) {
+			index_.erase(iter);
 		}
 	}
 
 	void Predictor::set_digram(Symbols* s) {
-		std::pair<uint64_t, uint64_t> key(s->raw_value(), s->next()->raw_value());
-		table_[std::move(key)] = s;
+		std::pair<uint64_t, uint64_t> key(s->get_symbol(), s->next()->get_symbol());
+		index_[std::move(key)] = s;
 	}
 
 	size_t Predictor::size() const {
@@ -179,15 +201,15 @@ namespace pIOn::sequitur {
 				stream << "[" << i << "] ";
 			}
 			else {
-				stream << s->value() << ' ';
+				stream << s->get_symbol() << ' ';
 			}
 		}
 	}
 
 	std::ostream& operator<<(std::ostream& stream, Predictor& pred)
 	{
-		pred.rules_.assign(pred.get_num_rules(), nullptr);
-		pred.rules_[0] = pred.start_;
+		pred.rules_.assign(2 * pred.get_num_rules(), nullptr);
+		pred.rules_[0] = pred.axiom_;
 		pred.rule_idx_ = 1;
 
 		for (uint64_t i = 0; i < pred.rule_idx_; i++) {
@@ -238,8 +260,8 @@ namespace pIOn::sequitur {
 	Predictor::iterator& Predictor::iterator::operator=(iterator&& other) noexcept
 	{
 		stack = std::move(other.stack);
-		version = other.version; other.version = 0;
-		parent = other.parent; parent == nullptr;
+		version = std::exchange(other.version, 0);
+		parent = std::exchange(other.parent, nullptr);
 		return *this;
 	}
 
@@ -298,7 +320,7 @@ namespace pIOn::sequitur {
 		}
 
 		Symbols* s = stack.top();
-		return s->value();
+		return s->get_symbol();
 	}
 
 	bool Predictor::iterator::operator==(const Predictor::iterator& it) {
