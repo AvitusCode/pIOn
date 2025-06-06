@@ -11,7 +11,6 @@
 #include <list>
 #include <vector>
 #include <unordered_map>
-#include <map>
 #include <stack>
 #include "utils/iterator_range.hpp"
 #include "types.hpp"
@@ -33,11 +32,11 @@ namespace pIOn::sequitur {
 
 		std::set<Rules*> rules_set_;
 		std::set<Symbols*> predictions_;
-		std::map<std::pair<uint64_t, uint64_t>, Symbols*> index_;
+		std::unordered_map<std::pair<uint64_t, uint64_t>, Symbols*> index_;
 
 		std::vector<Rules*> rules_;
-		uint64_t rule_idx_{ 0ULL };
-		uint64_t version_{ 0ULL }; // For iterator validation and limits checks
+		uint64_t rule_idx_{};
+		uint64_t version_{}; // For iterator validation and limits checks
 		size_t limit_{ ~0ULL }; // Grammar limit 
 
 		// Perform operations with the index
@@ -114,7 +113,7 @@ namespace pIOn::sequitur {
 			class invalid_iterator : public std::exception 
 			{
 			public:
-				virtual const char* what() const noexcept
+				const char* what() const noexcept override
 				{
 					return "Invalid iterator";
 				}

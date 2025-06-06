@@ -1,0 +1,18 @@
+{
+  "filename": "D:/visualProjects/pIOn/traces/vps26020.blktrace.0",
+  "window_size": 10,
+  "max_grammar_size": 2000,
+  "start": 0,
+  "end": 1000000000000,
+  "pid": 0,
+  "cpu": 0,
+  "lba_start": 14000000,
+  "lba_end": 19000000,
+  "hit_precentage": 50.0,
+  "is_pid_filter": false,
+  "is_cpu_filter": true,
+  "verbose": true,
+  "delta": false,
+  "type_based": true,
+  "type": 0
+}

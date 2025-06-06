@@ -9,6 +9,7 @@
 #include "symbols.hpp"
 #include "predictor.hpp"
 #include <stack>
+#include <cassert>
 
 std::ostream& operator<<(std::ostream& out, pIOn::sequitur::Symbols& s) {
 
@@ -41,6 +42,8 @@ namespace pIOn::sequitur {
 			return *this;
 		}
 
+		assert(prev_ && next_ && "prev_ and next_ need to be valid!");
+
 		join(prev_, next_);
 
 		if (!is_guard()) {
@@ -50,7 +53,7 @@ namespace pIOn::sequitur {
 			}
 		}
 
-		if (is_pred() && !nt() && owner_ != nullptr) {
+		if (is_pred() && !nt() && owner_) {
 			owner_->get_predictor()->remove_prediction(this);
 		}
 
@@ -140,7 +143,7 @@ namespace pIOn::sequitur {
 	// Note that the function is called on the X1 in rule A.
 	void Symbols::substitute(Rules* r)
 	{
-		Symbols* q = prev_; // q = previous
+		Symbols* q = prev_;
 
 		// create the new symbol ("B" in rule A in the example)
 		Symbols* B = r->get_predictor()->allocateSymbol(r, owner_);
@@ -327,7 +330,7 @@ namespace pIOn::sequitur {
 				continue;
 			}
 
-			auto&& users = pack.user->owner_->get_users();
+			auto& users = pack.user->owner_->get_users();
 			for (auto user = users.begin(); user != users.end(); ++user) {
 				stack.emplace(*user, pack.user);
 			}
@@ -455,7 +458,7 @@ namespace pIOn::sequitur {
 			if (sym_ptr->get_symbol() == matching->get_symbol()) {
 				if (owner_) {
 					become_predictor_down_right();
-					auto&& users = owner_->get_users();
+					auto& users = owner_->get_users();
 					for (auto user = users.begin(); user != users.end(); ++user) {
 						(*user)->become_predictor_up(sym_ptr);
 					}

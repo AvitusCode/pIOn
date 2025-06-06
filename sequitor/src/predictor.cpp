@@ -139,7 +139,7 @@ namespace pIOn::sequitur {
 	}
 
 	size_t Predictor::size() const {
-		size_t size{ 0 };
+		size_t size{ };
 		for (auto rule = rules_set_.begin(); rule != rules_set_.end(); ++rule) {
 			size += (*rule)->length();
 		}
@@ -188,7 +188,7 @@ namespace pIOn::sequitur {
 	void Predictor::print_rule(std::ostream& stream, Rules* r) {
 		for (Symbols* s = r->first(); !s->is_guard(); s = s->next()) {
 			if (s->nt()) {
-				uint64_t i{ 0 };
+				uint64_t i{};
 
 				if (rules_[s->rule()->index()] == s->rule()) {
 					i = s->rule()->index();

@@ -11,6 +11,7 @@
 
 #include "model/io_prophet.hpp"
 #include "blktrace_parser.hpp"
+#include "cyclic_buffer.hpp"
 #include "jdtests/timer.hpp"
 #include "utils/platform.hpp"
 #include "../config.h"
@@ -25,20 +26,23 @@ namespace pIOn
 	/// Collect H(S|S0)
 	/// </summary>
 	/// <param name="pack">Predicted IO metadata</param>
-	/// <param name="offset">Curent IO metadata</param>
-	/// <param name="size">Current IO metadata</param>
+	/// <param name="offset">Curent IO lba metadata</param>
+	/// <param name="size">Current IO size metadata</param>
 	/// <returns>[real] hit ratio in precent</returns>
-	real getHitRatio(const model::IOProphet::predict_pack_t& pack, uint64_t offset, uint64_t size) noexcept
+	[[nodiscard]] static inline real getHitRatio(const model::IOProphet::predict_pack_t& pack, uint64_t offset, uint64_t size) noexcept
 	{
-		real hit_ratio{ 0.0 };
+		real hit_ratio{};
+		if (pack.empty()) {
+			return hit_ratio;
+		}
 
-		for (auto it = pack.begin(); it != pack.end(); ++it) {
+		for (const auto& item : pack) {
 			// Predicted offset and size
-			size_t p_off{ it->first.lba() }, p_size{ it->first.size() };
-			size_t p_start = p_size != 0 ? std::min(p_off, offset) : offset;
-			size_t p_end = p_size != 0 ? std::max(p_off + p_size, offset + size) : (offset + size);
+			const size_t p_off{ item.first.lba() }, p_size{ item.first.size() };
+			const size_t p_start = p_size != 0 ? std::min(p_off, offset) : offset;
+			const size_t p_end = p_size != 0 ? std::max(p_off + p_size, offset + size) : (offset + size);
 
-			size_t overlap = 0;
+			size_t overlap{};
 			if (p_off <= offset) {
 				overlap = (p_off + p_size) <= offset ? 0 : ((offset + size) <= (p_off + p_size) ? size : (p_off + p_size - offset));
 			}
@@ -54,7 +58,48 @@ namespace pIOn
 			}
 		}
 
-		hit_ratio = (pack.size() == 0) ? hit_ratio : hit_ratio / pack.size();
+		hit_ratio /= pack.size();
+
+		return hit_ratio;
+	}
+
+	[[nodiscard]] static inline real 
+		getHitRatioDiap(const model::IOProphet::predict_pack_t& pack, uint64_t offset, uint64_t size, uint64_t factor = 1ull) noexcept
+	{
+		real hit_ratio{ 0.0 };
+		if (pack.empty()) {
+			return hit_ratio;
+		}
+
+		for (auto&& item : pack) {
+			// Predicted offset and size
+			const size_t factor_x_size{ factor * size };
+			const bool prolongation{ item.first.lba() > factor_x_size };
+			const size_t lba{ prolongation ? item.first.lba() - factor_x_size : item.first.lba() };
+			const size_t p_off{ lba }, p_size{ prolongation ? item.first.size() * (factor * 2ull + 1ull) : item.first.size() };
+
+			if (p_off <= offset && p_off + p_size >= size + offset) {
+				hit_ratio += 100.0;
+				continue;
+			}
+
+			size_t overlap{ 0 };
+			if (p_off <= offset) {
+				overlap = (p_off + p_size) <= offset ? 0 : ((offset + size) <= (p_off + p_size) ? size : (p_off + p_size - offset));
+			}
+			else {
+				overlap = (offset + size) <= p_off ? 0 : ((offset + size) <= (p_off + p_size) ? (offset + size - p_off) : 0);
+			}
+
+			if (size) {
+				hit_ratio += 100.0 * static_cast<real>(overlap) / size;
+			}
+			else if (p_size == 0) {
+				hit_ratio += 100.0;
+			}
+		}
+
+		hit_ratio /= pack.size();
 
 		return hit_ratio;
 	}
@@ -72,9 +117,19 @@ namespace pIOn
 		return path.substr(pos, path.size() - pos);
 	}
 
-	inline bool checkFile(const std::ofstream& file) noexcept
+	static inline bool checkFile(const std::ofstream& file) noexcept
 	{
 		return !file.is_open() || file.fail();
+	}
+
+	static bool is_pack_predicted(const model::IOProphet::predict_pack_t& pack, const blk_info_t& blk_info)
+	{
+		auto it = std::find_if(pack.cbegin(), pack.cend(), [&blk_info](const auto& item) {
+			const auto& blk = item.first;
+		    return blk_info.type() == blk.type() && blk_info.size() == blk.size() && blk_info.lba() == blk.lba();
+		});
+
+		return it != pack.cend();
 	}
 
 	void makeResearch(const Config& config)
@@ -83,18 +138,34 @@ namespace pIOn
 
 		BlkParserConfigs parse_config;
 		parse_config.filename = config.filename;
-		parse_config.cmd_limit = config.max_cmd;
+		parse_config.cmd_limit = config.end;
+		parse_config.cmd_ignore = config.start;
 		parse_config.adelta = config.delta;
 		parse_config.verbose = false;
-		parse_config.is_pid_ = config.is_pid_filter_;
+		parse_config.is_pid = config.is_pid_filter;
+		parse_config.is_cpu = config.is_cpu_filter;
 		parse_config.pid = config.pid;
+		parse_config.cpu = config.cpu;
 		parse_config.left_lba_limit = config.lba_start;
 		parse_config.right_lba_limit = config.lba_end;
 		BLKParser parser{ parse_config };
 
-		parser.setFilter([](const blk_info_t& info) {
-			return info.type() == OPERATION::WRITE;
-		});
+		switch (config.type)
+		{
+		case OPERATION::READ:
+			parser.setFilter([](const blk_info_t& info) noexcept {
+				return info.type() == OPERATION::READ;
+				});
+			break;
+		case OPERATION::WRITE:
+			parser.setFilter([](const blk_info_t& info) noexcept {
+				return info.type() == OPERATION::WRITE;
+				});
+			break;
+		default:
+			std::cerr << "Research failed: incorrect operation type!" << std::endl;
+			return;
+		}
 
 		parser.start();
 		if (!parser.need_io()) {
@@ -102,9 +173,10 @@ namespace pIOn
 			return;
 		}
 
-		std::ofstream ofile(ROOT_DIR "res/research_" + getCorrectFile(config.filename) + "_" + (config.delta ? "d" : "nd"), 
+		std::string _path_ = getCorrectFile(config.filename) + "_" + (config.delta ? "d" : "nd");
+		std::ofstream ofile(ROOT_DIR "res/research_" + _path_,
 			std::ios_base::out | std::ios_base::trunc);
-		std::ofstream pred_file(ROOT_DIR "res/predicted_" + getCorrectFile(config.filename) + "_" + (config.delta ? "d" : "nd"),
+		std::ofstream pred_file(ROOT_DIR "res/predicted_" + std::move(_path_),
 			std::ios_base::out | std::ios_base::trunc);
 		if (checkFile(ofile) || checkFile(pred_file)) {
 			std::cerr << "Fail to open the file for " << config.filename << "\nResearch failed" << std::endl;
@@ -113,6 +185,7 @@ namespace pIOn
 		
 		// @ MODEL
 		// Predictions that made at the end of last op
+		CyclicBuffer<10ULL> cyclic_buffer{};
 		model::IOProphet::predict_pack_t _predictions_; 
 		model::IOProphet prophet{ model::prophet_cfg_t{config.max_grammar_size} };
 		jd::timer::Timer clock;
@@ -166,14 +239,16 @@ namespace pIOn
 			}
 
 			real pred_percent = 0.0;
-			if (auto it = std::find_if(_predictions_.cbegin(), _predictions_.cend(), [&blk_info](const auto& item) {
-				const auto& blk = item.first;
-			return blk_info.type() == blk.type() && blk_info.size() == blk.size() && blk_info.lba() == blk.lba();
-				}); it != _predictions_.cend()) {
-				pred_percent = 1.0 / _predictions_.size();
+			if (is_pack_predicted(_predictions_, blk_info) || cyclic_buffer.in_pos(blk_info)) {
+				pred_percent = 1.0;
 				_pred_count_++;
 				is_predicted = true;
 			}
+
+			for (size_t idx = 1ULL; idx < _predictions_.size(); ++idx) {
+				cyclic_buffer.push(idx, _predictions_[idx].first);
+			}
+
 			_total_pred_count_ += !_predictions_.empty();
 
 			_total_prediction_ = _total_prediction_ * _num_operations_ + pred_percent * 100.0;
@@ -218,7 +293,7 @@ namespace pIOn
 			}
 
 			// Hit ratio -> to function
-			real hit_ratio = getHitRatio(_predictions_, blk_info.lba(), blk_info.size());
+			real hit_ratio = getHitRatioDiap(_predictions_, blk_info.lba(), blk_info.size(), 1);
 			is_predicted = is_predicted ? is_predicted : hit_ratio >= config.hit_precentage;
 
 			// Time results
@@ -257,12 +332,14 @@ namespace pIOn
 				<< offset_error << " "
 				<< hit_ratio << std::endl;
 
+
 			_previous_time_ = blk_info.time();
 			_previous_size_ = blk_info.size();
 			_previous_offset_ = blk_info.lba();
 
 			clock.start();
 			prophet.insert(blk_info);
+			cyclic_buffer.step();
 			_predictions_ = prophet.predict();
 			clock.stop();
 		}

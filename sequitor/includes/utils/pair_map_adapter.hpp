@@ -12,9 +12,9 @@ namespace pIOn::utils
 		using key_t = std::pair<Key, Key>;
 		using value_t = Value;
 
-		[[nodiscard]] Value& operator()(const Key& i, const Key& j) noexcept;
-		[[nodiscard]] const Value& operator()(const Key& i, const Key& j) const noexcept;
-		[[nodiscard]] bool contains() const noexcept;
+		[[nodiscard]] value_t& operator()(const Key& i, const Key& j) noexcept;
+		[[nodiscard]] const value_t& operator()(const Key& i, const Key& j) const noexcept;
+		[[nodiscard]] bool contains(const Key& i, const Key& j) const noexcept;
 		void clear() noexcept;
 	private:
 		std::map<key_t, value_t> container_;
@@ -38,9 +38,9 @@ namespace pIOn::utils
 		}
 	}
 	template<typename Key, typename Value>
-	inline bool PairMapAdapter<Key, Value>::contains() const noexcept
+	inline bool PairMapAdapter<Key, Value>::contains(const Key& i, const Key& j) const noexcept
 	{
-		return container_.count(key_t(i, j)) > 0;
+		return container_.contains(key_t(i, j));
 	}
 
 	template<typename Key, typename Value>

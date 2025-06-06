@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.17)
 
 set(SEQUITOR jdSequitor)
 
@@ -13,8 +13,9 @@ set(SEQUITOR_SRC
 )
 
 add_library(${SEQUITOR} STATIC ${SEQUITOR_SRC})
+#target_link_libraries(${SEQUITOR} PUBLIC ${Boost_LIBRARIES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SEQUITOR_SRC})
 
 target_include_directories(${SEQUITOR} PUBLIC includes)
 target_include_directories(${SEQUITOR} PRIVATE src)
-target_compile_features(${SEQUITOR} PUBLIC cxx_std_17)
+target_compile_features(${SEQUITOR} PUBLIC cxx_std_20)

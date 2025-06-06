@@ -58,8 +58,10 @@ namespace pIOn::utils
 			Buffer(const Buffer&) = delete;
 			Buffer& operator=(const Buffer&) = delete;
 
+			// If there is not anought mem in the system then std::bad_alloc is a good
+			// for stoping the programm
 			Buffer(size_t num = CHUNCK_SIZE)
-				: buffer_(reinterpret_cast<T*> (::operator new (sizeof(T) * num)))
+				: buffer_((T*)(malloc(sizeof(T) * num)))
 				, size_(num)
 			{
 			}
@@ -82,7 +84,8 @@ namespace pIOn::utils
 			~Buffer() noexcept 
 			{
 				if (buffer_) {
-					::operator delete(buffer_);
+					free(buffer_);
+					buffer_ = nullptr;
 				}
 			}
 
@@ -98,7 +101,7 @@ namespace pIOn::utils
 
 		private:
 			T* buffer_{ nullptr };
-			size_t size_{ 0 };
+			size_t size_{};
 		};
 
 		std::vector<Buffer> buffers;

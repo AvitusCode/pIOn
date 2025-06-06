@@ -195,5 +195,7 @@ int main(void)
 {
 	test::groupTests("traces/vps26020.blktrace.0", 100);
 
+	std::cout << "Press any key to exit..." << std::endl;
+	[[maybe_unused]] auto c = getchar(); // waits for user input
 	return 0;
 }

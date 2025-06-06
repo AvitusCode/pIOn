@@ -16,7 +16,7 @@ namespace jd::timer
 			time_ = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start_).count());
 		}
 
-		double time() const noexcept {
+		[[nodiscard]] double time() const noexcept {
 			return time_;
 		}
 

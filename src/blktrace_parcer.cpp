@@ -41,14 +41,14 @@ struct blk_io_trace
 	uint64_t sector;    // offset from start of the file in sectors (one sector is 512 bytes)
 	uint32_t size;      // data size in bytes
 	uint32_t action;    // Read, Write or etc
-	uint32_t pid;
+	uint32_t pid;       // A specific thread
 	uint32_t device;
-	uint32_t cpu;
+	uint32_t cpu;       // A specific cpu
 	uint16_t error;
 	uint16_t pdu_len;   // lenght of data after this trace
 };
 
-static inline bool verify_trace(blk_io_trace* t)
+static inline bool verify_trace(const blk_io_trace* t)
 {
 	if (!CHECK_MAGIC(t))
 	{
@@ -67,19 +67,22 @@ static inline bool verify_trace(blk_io_trace* t)
 
 namespace pIOn
 {
-	BLKParser::BLKParser(const BlkParserConfigs& config)
+	BLKParser::BLKParser(const BlkParserConfigs& config) noexcept
 		: filename_{ config.filename }
 		, cmd_limit_{ config.cmd_limit }
+		, cmd_ignore_{ config.cmd_ignore }
 		, left_lba_limit_{ config.left_lba_limit }
 		, right_lba_limit_{ config.right_lba_limit }
 		, left_time_limit_{ config.left_time_limit }
 		, right_time_limit_{ config.right_time_limit }
 		, pid_{ config.pid }
-		, is_pid_filter_{ config.is_pid_ }
+		, cpu_{ config.cpu }
+		, is_pid_filter_{ config.is_pid }
+		, is_cpu_filter_{ config.is_cpu }
 		, is_adelta_{ config.adelta }
 		, is_verbose_{ config.verbose }
 	{
-		filter_ = [](const blk_info_t&) {
+		filter_ = [](const blk_info_t&) noexcept {
 			return true;
 		};
 	}
@@ -101,6 +104,38 @@ namespace pIOn
 		return is_first_read_ ? 0.0 : cur_time - time_prev_;
 	}
 
+	inline bool BLKParser::filter(const blk_io_trace& blk_line) noexcept
+	{
+		if (!verify_trace(&blk_line)) {
+			is_error_ = true;
+			return false;
+		}
+
+		++cur_pos_;
+		if (cur_pos_ < cmd_ignore_) {
+			return false;
+		}
+
+		if (cur_pos_ > cmd_limit_) {
+			is_eof_ = true;
+			return false;
+		}
+
+		if (is_cpu_filter_ && blk_line.cpu != cpu_) {
+			return false;
+		}
+
+		if (is_pid_filter_ && blk_line.pid != pid_) {
+			return false;
+		}
+
+		if (blk_line.sector < left_lba_limit_ || blk_line.sector > right_lba_limit_) {
+			return false;
+		}
+
+		return true;
+	}
+
 	std::optional<blk_info_t> BLKParser::parse_line()
 	{
 		if (is_error_) {
@@ -113,7 +148,7 @@ namespace pIOn
 			throw std::runtime_error{ "File does not open!" };
 		}
 
-		std::optional<blk_info_t> result;
+		std::optional<blk_info_t> result{};
 
 		if (ifile_.eof()) {
 			is_eof_ = true;
@@ -126,22 +161,7 @@ namespace pIOn
 			ifile_.seekg(static_cast<size_t>(ifile_.tellg()) + blk_line.pdu_len);
 		}
 
-		if (!verify_trace(&blk_line)) {
-			is_error_ = true;
-			return result;
-		}
-
-		++cur_pos_;
-		if (cur_pos_ > cmd_limit_) {
-			is_eof_ = true;
-			return result;
-		}
-
-		if (is_pid_filter_ && blk_line.pid != pid_) {
-			return result;
-		}
-
-		if (blk_line.sector < left_lba_limit_ || blk_line.sector > right_lba_limit_) {
+		if (!this->filter(blk_line)) {
 			return result;
 		}
 
@@ -157,7 +177,11 @@ namespace pIOn
 		uint64_t delta_size = get_next_offset(blk_line.sector, blk_line.size);
 		is_first_read_ = false;
 
-		result = builder_.setSector(blk_line.sector).setSize(delta_size).setTime(delta_time).setOp(r ? 0 : 1).build();
+		result = builder_.setSector(blk_line.sector)
+			             .setSize(delta_size)
+			             .setTime(delta_time)
+			             .setOp(r ? 0 : 1)
+			             .build();
 
 		time_prev_ = time_cur;
 		offset_prev_ = blk_line.sector;
@@ -232,7 +256,7 @@ namespace pIOn
 		return filename_;
 	}
 
-	BLKParser& BLKParser::setFilter(filter_t filter)
+	BLKParser& BLKParser::setFilter(filter_t filter) noexcept
 	{
 		if (!is_started_) {
 			filter_ = std::move(filter);
@@ -242,13 +266,25 @@ namespace pIOn
 
 	void BLKParser::start() noexcept
 	{
-		assert(left_lba_limit_ < right_lba_limit_ && "limits problem!");
-		if (ifile_.is_open()) {
-			std::cout << "File " << filename_ << " is already opened" << std::endl;
+		if (is_error_) {
+			std::cerr << "BLKParser is in error state" << std::endl;
 			return;
 		}
-		if (is_error_) {
-			std::cout << "BLKParser is in error state" << std::endl;
+
+		if (right_lba_limit_ <= left_lba_limit_) {
+			std::cerr << "lba limits problem!" << std::endl;
+			is_error_ = true;
+			return;
+		}
+
+		if (cmd_limit_ <= cmd_ignore_) {
+			std::cerr << "cmd limits problem!" << std::endl;
+			is_error_ = true;
+			return;
+		}
+
+		if (ifile_.is_open()) {
+			std::cerr << "File " << filename_ << " is already opened" << std::endl;
 			return;
 		}
 
@@ -258,6 +294,7 @@ namespace pIOn
 			std::string message = "File " + filename_ + " was not opened";
 			std::cerr << message << std::endl;
 			is_error_ = true;
+			return;
 		}
 		else {
 			is_error_ = false;

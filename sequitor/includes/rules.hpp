@@ -28,7 +28,7 @@ namespace pIOn::sequitur {
 		std::set<Symbols*> users_;
 
 		// For inner using
-		uint64_t idx_{ 0 };
+		uint64_t idx_{};
 		Predictor* predictor_{ nullptr };
 	public:
 		Rules() = delete;
@@ -38,7 +38,7 @@ namespace pIOn::sequitur {
 		Rules& operator=(Rules&&) = delete;
 
 		Rules(Predictor* o);
-		~Rules() noexcept;
+		~Rules();
 
 		void reuse(Symbols* user);
 		void deuse(Symbols* user);
@@ -48,13 +48,13 @@ namespace pIOn::sequitur {
 		size_t length() const;
 		void for_each(std::function<void(Symbols*)> func) noexcept;
 
-		uint64_t freq() const { return users_.size(); };
-		uint64_t index() const { return idx_; };
+		uint64_t freq() const noexcept { return users_.size(); };
+		uint64_t index() const noexcept { return idx_; };
 		void index(uint64_t idx) { idx_ = idx; };
-		Predictor* get_predictor() const { return predictor_; };
-		std::set<Symbols*>& get_users() { return users_; };
-		const std::set<Symbols*>& get_users() const { return users_; };
-		const Symbols* get_guard() const { return guard_; };
+		Predictor* get_predictor() const noexcept { return predictor_; };
+		std::set<Symbols*>& get_users() noexcept { return users_; };
+		const std::set<Symbols*>& get_users() const noexcept { return users_; };
+		const Symbols* get_guard() const noexcept { return guard_; };
 	};
 
 }

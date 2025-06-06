@@ -21,7 +21,7 @@ namespace pIOn::sequitur {
 		predictor_->rules_set_.insert(this);
 	}
 
-	Rules::~Rules() noexcept {
+	Rules::~Rules() {
 		predictor_->rules_set_.erase(this);
 		guard_->release();
 		predictor_->deallocate(guard_);

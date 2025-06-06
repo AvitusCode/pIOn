@@ -17,19 +17,19 @@ namespace pIOn::sequitur {
 	private:
 		Symbols* next_{ nullptr };
 		Symbols* prev_{ nullptr };
-		uint64_t sym_{ 0ULL };
+		uint64_t sym_{};
 
 		Rules* owner_{ nullptr };                // indicates in which rule this symbol appears
-		bool is_predictor_{ false };
-		bool is_terminal_{ true };
 
 		std::set<Symbols*> predictors_;
-
 		std::set<Symbols*> next_new_predictor_;  // next set of new predictors
 		std::set<Symbols*> next_stay_predictor_; // predictors that stay predictors
+
+		bool is_predictor_{ false };
+		bool is_terminal_{ true };
 		bool next_is_predictor_{ false };        // next value for is_predictore
 		bool next_updated_{ false };             // wether we already called compute_next_predictors
-		uint8_t next_return_{ 0 };               // return value of the last call to compute_next_predictors
+		uint8_t next_return_{};                  // return value of the last call to compute_next_predictors
 	public:
 
 		/**
@@ -54,11 +54,11 @@ namespace pIOn::sequitur {
 		void set_digram();
 		void delete_digram();
 
-		bool is_pred() const {
+		bool is_pred() const noexcept {
 			return is_predictor_;
 		}
 
-		uint64_t freq() const {
+		uint64_t freq() const noexcept {
 			return owner_ ? owner_->freq() : 0ULL;
 		}
 
@@ -83,7 +83,8 @@ namespace pIOn::sequitur {
 
 			// update the new owner of the right symbol 
 			right->owner_ = left->owner_;
-			left->next_ = right; right->prev_ = left;
+			left->next_ = right; 
+			right->prev_ = left;
 		}
 
 		// inserts a symbol after this one.
@@ -93,20 +94,20 @@ namespace pIOn::sequitur {
 		};
 
 		// true if this is the guard node marking the beginning/end of a rule
-		bool is_guard() { 
+		bool is_guard() noexcept {
 			return nt() && rule()->get_guard() == this; 
 		};
 
 		// nt() returns true if a symbol is non-terminal.
-		bool nt() { return (!is_terminal_) && (sym_ != 0); };
-		bool term() { return is_terminal_ || sym_ == 0; };
+		bool nt() const noexcept { return (!is_terminal_) && (sym_ != 0); };
+		bool term() const noexcept { return is_terminal_ || sym_ == 0; };
 
-		Symbols* next() { return next_; };
-		Symbols* prev() { return prev_; };
-		uint64_t get_symbol() const { return sym_; };
+		Symbols* next() noexcept { return next_; };
+		Symbols* prev() noexcept { return prev_; };
+		uint64_t get_symbol() const noexcept { return sym_; };
 
 		// assuming this is a non-terminal, returns the corresponding rule
-		Rules* rule() { return reinterpret_cast<Rules*>(sym_); };
+		Rules* rule() noexcept { return reinterpret_cast<Rules*>(sym_); };
 
 		void substitute(Rules* r);
 		static void match(Symbols* s, Symbols* m);

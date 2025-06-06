@@ -8,18 +8,23 @@
 #include <optional>
 #include "model/blk_info.hpp"
 
+struct blk_io_trace;
+
 namespace pIOn
 {
 	struct BlkParserConfigs
 	{
 		uint64_t cmd_limit{ 10 };
+		uint64_t cmd_ignore{ 0 };
 		uint64_t left_lba_limit{ 0 };
 		uint64_t right_lba_limit{ ~0ULL };
 		double left_time_limit{ 0.0 };
 		double right_time_limit{ std::numeric_limits<double>::max() };
 
 		uint64_t pid{ 0 };
-		bool is_pid_{ false };
+		uint64_t cpu{};
+		bool is_pid{ false };
+		bool is_cpu{ false };
 		bool adelta{ false };
 		bool verbose{ false };
 
@@ -37,7 +42,7 @@ namespace pIOn
 		BLKParser& operator=(const BLKParser&) = delete;
 		BLKParser(BLKParser&&) = delete;
 		BLKParser& operator=(BLKParser&&) = delete;
-		BLKParser(const BlkParserConfigs& config);
+		explicit BLKParser(const BlkParserConfigs& config) noexcept;
 		~BLKParser() noexcept;
 
 		[[nodiscard]] std::optional<blk_info_t> parse_next();
@@ -47,8 +52,8 @@ namespace pIOn
 		void skip();
 
 		[[nodiscard]] const std::string& getFileName() const noexcept;
-		BLKParser& setFilter(filter_t filter);
-		
+		BLKParser& setFilter(filter_t filter) noexcept;
+
 		void start() noexcept;
 		void reset() noexcept;
 		void stop() noexcept;
@@ -72,16 +77,20 @@ namespace pIOn
 		std::optional<blk_info_t> parse_line();
 		uint64_t get_next_offset(uint64_t cur_sector, uint64_t cur_offset) const noexcept;
 		double get_delta_time(double cur_time) const noexcept;
+		bool filter(const blk_io_trace&) noexcept;
 
 		// Parameters
 		const std::string filename_;
 		const uint64_t cmd_limit_{ 10 };
+		const uint64_t cmd_ignore_{ 10 };
 		const uint64_t left_lba_limit_{ 0 };
 		const uint64_t right_lba_limit_{ 0 };
-		const double left_time_limit_{0.0};
-		const double right_time_limit_{0.0};
-		const uint64_t pid_{0};
+		const double left_time_limit_{ 0.0 };
+		const double right_time_limit_{ 0.0 };
+		const uint64_t pid_{ 0 };
+		const uint64_t cpu_{ 0 };
 		const bool is_pid_filter_{ false };
+		const bool is_cpu_filter_{ false };
 		const bool is_adelta_{ false };
 		const bool is_verbose_{ false };
 
@@ -93,7 +102,7 @@ namespace pIOn
 		double time_prev_{ 0.0 };
 		size_t offset_prev_{ 0 };
 		uint64_t cur_pos_{ 0 };
-		
+
 		bool is_eof_{ false };
 		bool is_error_{ false };
 		bool is_first_read_{ true };
